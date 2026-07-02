@@ -54,6 +54,7 @@ def approve_user(user_id):
     c.execute("DELETE FROM pending_requests WHERE user_id = ?", (user_id,))
     conn.commit()
     conn.close()
+    return True
 
 def reject_user(user_id):
     conn = sqlite3.connect('users.db')
@@ -61,6 +62,7 @@ def reject_user(user_id):
     c.execute("DELETE FROM pending_requests WHERE user_id = ?", (user_id,))
     conn.commit()
     conn.close()
+    return True
 
 def is_user_approved(user_id):
     conn = sqlite3.connect('users.db')
@@ -113,13 +115,12 @@ def get_user_history(user_id, limit=10):
 init_db()
 
 # ---------- ADMIN ID ----------
-ADMIN_ID = os.environ.get('ADMIN_ID', '6452420624')  # Get from environment variable
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '8911815800:AAEYFNjrr8odBTeWGrq5M9_5atqj1ItvXMg')  # Get from environment variable
+ADMIN_ID = os.environ.get('ADMIN_ID', '6452420624')
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '8911815800:AAEYFNjrr8odBTeWGrq5M9_5atqj1ItvXMg')
 
 # ---------- REAL GATEWAY CHECKERS ----------
 
 def check_card_stripe(ccnum, expm, expy, cvv):
-    """Stripe - Format Check"""
     try:
         stripe_key = "pk_live_51KsPaQIxJgLWZnRXmgIBQqiiTKnQnpLqzuciPJtiG9u3joyxMfA4e5VIMJgBC1DeyJ8iJuRTtEloA6OEfqr6SPkg004ZLA8HmG"
         url = "https://api.stripe.com/v1/tokens"
@@ -144,7 +145,6 @@ def check_card_stripe(ccnum, expm, expy, cvv):
         return ["❌ Stripe: Error", False]
 
 def check_card_shopify(ccnum, expm, expy, cvv):
-    """Shopify Real Store"""
     try:
         session = requests.Session()
         url = "https://www.gymshark.com/checkout"
@@ -170,7 +170,6 @@ def check_card_shopify(ccnum, expm, expy, cvv):
         return ["❌ Shopify: Error", False]
 
 def check_card_netflix(ccnum, expm, expy, cvv):
-    """Netflix"""
     try:
         session = requests.Session()
         url = "https://www.netflix.com/signup/payment"
@@ -195,7 +194,6 @@ def check_card_netflix(ccnum, expm, expy, cvv):
         return ["❌ Netflix: Error", False]
 
 def check_card_amazon(ccnum, expm, expy, cvv):
-    """Amazon Payments"""
     try:
         session = requests.Session()
         url = "https://payments.amazon.com/checkout"
@@ -220,7 +218,6 @@ def check_card_amazon(ccnum, expm, expy, cvv):
         return ["❌ Amazon: Error", False]
 
 def check_card_ding(ccnum, expm, expy, cvv):
-    """Ding.com - Real Charge $1.33 with New API"""
     try:
         browsers = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:{}) Gecko/20100101 Firefox/{}",
@@ -232,7 +229,6 @@ def check_card_ding(ccnum, expm, expy, cvv):
         if len(expy) == 4:
             expy = expy[2:]
 
-        # Step 1: Get CSRF Token
         url22 = "https://www.ding.com/payment"
         response22 = requests.get(url22, headers={"User-Agent": user_agent}, timeout=10)
         csrf = ""
@@ -253,7 +249,6 @@ def check_card_ding(ccnum, expm, expy, cvv):
         if not csrf:
             return ["❌ Ding: CSRF Failed", False]
 
-        # Step 2: Create Payment Session
         url = "https://www.ding.com/payment"
         headers = {
             "accept": "*/*",
@@ -287,7 +282,6 @@ def check_card_ding(ccnum, expm, expy, cvv):
         
         pmid, secret = pmidd.split("_secret_")
 
-        # Step 3: Confirm Payment with Card
         url = f"https://www.ding.com/payment{pmid}/confirm"
         headers = {
             "accept": "application/json",
@@ -422,7 +416,7 @@ def main_menu_keyboard():
 def admin_menu_keyboard():
     keyboard = InlineKeyboardMarkup(row_width=2)
     keyboard.add(
-        InlineKeyboardButton("📋 Pending", callback_data="admin_pending"),
+        InlineKeyboardButton("📋 Pending Requests", callback_data="admin_pending"),
         InlineKeyboardButton("👥 All Users", callback_data="admin_users")
     )
     keyboard.add(
@@ -434,6 +428,18 @@ def admin_menu_keyboard():
 def back_to_main_keyboard():
     keyboard = InlineKeyboardMarkup()
     keyboard.add(InlineKeyboardButton("🔙 Back to Main", callback_data="back_to_main"))
+    return keyboard
+
+# ---------- APPROVAL KEYBOARD ----------
+def get_approval_keyboard(user_id, username, first_name):
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user_id}"),
+        InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user_id}")
+    )
+    keyboard.add(
+        InlineKeyboardButton("📋 View All Pending", callback_data="admin_pending")
+    )
     return keyboard
 
 # ---------- /START COMMAND ----------
@@ -449,12 +455,10 @@ def send_welcome(message):
             welcome_text = f"""
 <b>👋 Welcome Admin {user.first_name}!</b> 🎉
 
-<b>🔧 Admin Commands:</b>
-• /approve [user_id] - Approve user
-• /reject [user_id] - Reject user
-• /pending - View pending requests
-• /users - View all users
-• /stats - Bot statistics
+<b>🔧 Admin Panel:</b>
+• Use buttons below to manage users
+• Approve/Reject requests with inline buttons
+• View all users and statistics
 
 <b>🆔 Your ID:</b> <code>{user_id}</code>
 """
@@ -478,24 +482,33 @@ def send_welcome(message):
         else:
             add_pending_request(user_id, user.username or "None", user.first_name or "Unknown")
             
+            # Send approval request to admin with inline buttons
             admin_text = f"""
-<b>🔔 New Request!</b>
+<b>🔔 New Approval Request!</b>
 
 <b>👤 User:</b> {user.first_name}
-<b>🆔 ID:</b> <code>{user_id}</code>
+<b>🆔 User ID:</b> <code>{user_id}</code>
 <b>👤 Username:</b> @{user.username or 'None'}
 
-<b>Action:</b> /approve {user_id}
+<b>📅 Requested:</b> {datetime.now().strftime("%Y-%m-%d %H:%M")}
+
+Click below to approve or reject:
 """
-            bot.send_message(ADMIN_ID, admin_text, parse_mode="HTML")
+            
+            # Send to admin with inline buttons
+            bot.send_message(
+                ADMIN_ID, 
+                admin_text, 
+                parse_mode="HTML",
+                reply_markup=get_approval_keyboard(user_id, user.username or "None", user.first_name or "Unknown")
+            )
             
             welcome_text = f"""
 <b>👋 Welcome {user.first_name}!</b> 🎉
 
 <b>⏳ Your request is pending!</b>
 
-Admin is reviewing your request.
-You will be notified when approved.
+Admin has been notified. You will receive a notification when approved.
 
 <b>🆔 Your ID:</b> <code>{user_id}</code>
 """
@@ -513,7 +526,7 @@ def handle_text(message):
         return
     
     if user_id != ADMIN_ID and not is_user_approved(user_id):
-        bot.reply_to(message, "❌ You are not approved! Please use /start to request access.", parse_mode="HTML")
+        bot.reply_to(message, "❌ You are not approved! Use /start to request access.", parse_mode="HTML")
         return
     
     if '|' in message.text:
@@ -564,19 +577,14 @@ Example: <code>4111111111111111|12|26|123</code>
 <b>2. Multiple Cards:</b>
 Send a <b>.txt file</b> with one card per line
 
-<b>3. Admin Commands:</b>
-/approve [id] - Approve user
-/reject [id] - Reject user
-/pending - View pending requests
-/users - View all users
-/stats - Bot statistics
-
 <b>🔄 Gateways:</b>
 • Stripe - Format Check
 • Shopify - Real Store
 • Netflix - Subscription Check
 • Amazon - Payment Check
 • Ding.com - Real Charge ($1.33)
+
+<b>✅ Valid if 2+ gateways approve</b>
 """
         bot.reply_to(message, help_text, parse_mode="HTML", reply_markup=main_menu_keyboard())
 
@@ -678,7 +686,7 @@ def handle_txt_file(message):
         reply_markup=main_menu_keyboard()
     )
 
-# ---------- ADMIN COMMANDS ----------
+# ---------- ADMIN COMMANDS (Fallback) ----------
 @bot.message_handler(commands=['approve'])
 def approve_user_cmd(message):
     if str(message.from_user.id) != ADMIN_ID:
@@ -688,18 +696,26 @@ def approve_user_cmd(message):
     try:
         parts = message.text.split()
         if len(parts) < 2:
-            bot.reply_to(message, "⚠️ Usage: /approve [user_id]", parse_mode="HTML")
+            bot.reply_to(message, "⚠️ Usage: /approve [user_id]\nExample: /approve 6280641052", parse_mode="HTML")
             return
         
         user_id = parts[1]
         approve_user(user_id)
         
+        # Notify user
         try:
-            bot.send_message(user_id, "<b>✅ Your request has been approved!</b>\n\nYou can now use the bot.", parse_mode="HTML")
+            bot.send_message(user_id, "<b>✅ Your request has been approved!</b>\n\nYou can now use the bot.\nSend /start to begin.", parse_mode="HTML")
         except:
             pass
         
-        bot.reply_to(message, f"✅ User {user_id} approved successfully!", parse_mode="HTML")
+        # Notify admin
+        bot.reply_to(message, f"✅ User <code>{user_id}</code> approved successfully!", parse_mode="HTML")
+        
+        # Update pending list if needed
+        pending = get_pending_requests()
+        if pending:
+            bot.send_message(ADMIN_ID, f"📋 Remaining pending: {len(pending)}")
+            
     except Exception as e:
         bot.reply_to(message, f"❌ Error: {str(e)}", parse_mode="HTML")
 
@@ -712,18 +728,20 @@ def reject_user_cmd(message):
     try:
         parts = message.text.split()
         if len(parts) < 2:
-            bot.reply_to(message, "⚠️ Usage: /reject [user_id]", parse_mode="HTML")
+            bot.reply_to(message, "⚠️ Usage: /reject [user_id]\nExample: /reject 6280641052", parse_mode="HTML")
             return
         
         user_id = parts[1]
         reject_user(user_id)
         
+        # Notify user
         try:
             bot.send_message(user_id, "<b>❌ Your request has been rejected!</b>\n\nContact admin for more info.", parse_mode="HTML")
         except:
             pass
         
-        bot.reply_to(message, f"✅ User {user_id} rejected!", parse_mode="HTML")
+        bot.reply_to(message, f"✅ User <code>{user_id}</code> rejected!", parse_mode="HTML")
+        
     except Exception as e:
         bot.reply_to(message, f"❌ Error: {str(e)}", parse_mode="HTML")
 
@@ -741,7 +759,7 @@ def pending_requests_cmd(message):
     text = "<b>📋 Pending Requests:</b>\n\n"
     for user_id, username, first_name, date in pending:
         text += f"👤 {first_name} (@{username})\n"
-        text += f"🆔 <code>{user_id}</code>\n"
+        text += f"🆔 <code>{user_id}</code> (Tap to copy)\n"
         text += f"📅 {date}\n"
         text += f"/approve {user_id} | /reject {user_id}\n\n"
     
@@ -800,6 +818,66 @@ def handle_callback(call):
     try:
         user_id = str(call.from_user.id)
         
+        # Handle Approve/Reject from inline buttons
+        if call.data.startswith('approve_'):
+            if user_id != ADMIN_ID:
+                bot.answer_callback_query(call.id, "❌ Only admin can approve!", show_alert=True)
+                return
+            
+            target_user_id = call.data.replace('approve_', '')
+            approve_user(target_user_id)
+            
+            # Notify user
+            try:
+                bot.send_message(target_user_id, "<b>✅ Your request has been approved!</b>\n\nYou can now use the bot.\nSend /start to begin.", parse_mode="HTML")
+            except:
+                pass
+            
+            # Update admin message
+            bot.edit_message_text(
+                f"<b>✅ User {target_user_id} has been approved!</b>",
+                call.message.chat.id,
+                call.message.message_id,
+                parse_mode="HTML"
+            )
+            
+            bot.answer_callback_query(call.id, f"✅ User {target_user_id} approved!")
+            
+            # Show remaining pending
+            pending = get_pending_requests()
+            if pending:
+                bot.send_message(ADMIN_ID, f"📋 Remaining pending: {len(pending)}")
+            else:
+                bot.send_message(ADMIN_ID, "📭 No more pending requests!")
+            
+            return
+        
+        elif call.data.startswith('reject_'):
+            if user_id != ADMIN_ID:
+                bot.answer_callback_query(call.id, "❌ Only admin can reject!", show_alert=True)
+                return
+            
+            target_user_id = call.data.replace('reject_', '')
+            reject_user(target_user_id)
+            
+            # Notify user
+            try:
+                bot.send_message(target_user_id, "<b>❌ Your request has been rejected!</b>\n\nContact admin for more info.", parse_mode="HTML")
+            except:
+                pass
+            
+            # Update admin message
+            bot.edit_message_text(
+                f"<b>❌ User {target_user_id} has been rejected!</b>",
+                call.message.chat.id,
+                call.message.message_id,
+                parse_mode="HTML"
+            )
+            
+            bot.answer_callback_query(call.id, f"❌ User {target_user_id} rejected!")
+            return
+        
+        # Regular menu callbacks
         if call.data == "check_card":
             bot.answer_callback_query(call.id, "Send card in format: card|month|year|cvv")
             bot.send_message(call.message.chat.id, 
@@ -852,8 +930,9 @@ Send a <b>.txt file</b> with one card per line
                     reply_markup=admin_menu_keyboard()
                 )
             else:
-                user = call.from_user
-                welcome_text = f"""
+                if is_user_approved(user_id):
+                    user = call.from_user
+                    welcome_text = f"""
 <b>👋 Welcome {user.first_name}!</b> 🎉
 
 <b>✅ You are approved!</b>
@@ -863,13 +942,21 @@ Send a <b>.txt file</b> with one card per line
 2. Send a <b>.txt file</b> to check multiple cards
 3. Format: <code>4111111111111111|12|26|123</code>
 """
-                bot.edit_message_text(
-                    welcome_text,
-                    call.message.chat.id,
-                    call.message.message_id,
-                    parse_mode="HTML",
-                    reply_markup=main_menu_keyboard()
-                )
+                    bot.edit_message_text(
+                        welcome_text,
+                        call.message.chat.id,
+                        call.message.message_id,
+                        parse_mode="HTML",
+                        reply_markup=main_menu_keyboard()
+                    )
+                else:
+                    bot.edit_message_text(
+                        "<b>⏳ Your request is pending approval!</b>\n\nPlease wait for admin to approve your request.",
+                        call.message.chat.id,
+                        call.message.message_id,
+                        parse_mode="HTML",
+                        reply_markup=back_to_main_keyboard()
+                    )
                 
         elif call.data == "admin_pending":
             pending = get_pending_requests()
@@ -877,14 +964,23 @@ Send a <b>.txt file</b> with one card per line
                 bot.send_message(call.message.chat.id, "📭 No pending requests!", parse_mode="HTML")
                 return
             
-            text = "<b>📋 Pending Requests:</b>\n\n"
             for user_id, username, first_name, date in pending:
-                text += f"👤 {first_name} (@{username})\n"
-                text += f"🆔 <code>{user_id}</code>\n"
-                text += f"📅 {date}\n"
-                text += f"/approve {user_id} | /reject {user_id}\n\n"
-            
-            bot.send_message(call.message.chat.id, text, parse_mode="HTML")
+                admin_text = f"""
+<b>📋 Pending Request:</b>
+
+<b>👤 User:</b> {first_name}
+<b>🆔 ID:</b> <code>{user_id}</code>
+<b>👤 Username:</b> @{username or 'None'}
+<b>📅 Requested:</b> {date}
+
+Click below to approve or reject:
+"""
+                bot.send_message(
+                    call.message.chat.id,
+                    admin_text,
+                    parse_mode="HTML",
+                    reply_markup=get_approval_keyboard(user_id, username, first_name)
+                )
             
         elif call.data == "admin_users":
             users = get_all_users()
@@ -926,7 +1022,6 @@ Send a <b>.txt file</b> with one card per line
 
 # ---------- MAIN ----------
 if __name__ == "__main__":
-    # Single card check via CMD (for local testing)
     if len(sys.argv) == 2 and not os.environ.get('RAILWAY_ENVIRONMENT'):
         card_info = sys.argv[1]
         print("\n" + "="*60)
@@ -963,14 +1058,12 @@ if __name__ == "__main__":
         print("\n" + "="*60)
         sys.exit(0)
     
-    # Start bot
     else:
-        # Keep bot running even with errors
         while True:
             try:
                 bot.remove_webhook()
                 print("="*60)
-                print("✅ Bot Started Successfully on Railway!")
+                print("✅ Bot Started Successfully!")
                 print(f"👤 Admin ID: {ADMIN_ID}")
                 print("📊 Database: users.db")
                 print("="*60)
