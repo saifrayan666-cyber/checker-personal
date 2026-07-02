@@ -113,8 +113,8 @@ def get_user_history(user_id, limit=10):
 init_db()
 
 # ---------- ADMIN ID ----------
-ADMIN_ID = os.environ.get('ADMIN_ID', '6280641052')  # Get from environment variable
-BOT_TOKEN = os.environ.get('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')  # Get from environment variable
+ADMIN_ID = os.environ.get('ADMIN_ID', '6452420624')  # Get from environment variable
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '8911815800:AAEYFNjrr8odBTeWGrq5M9_5atqj1ItvXMg')  # Get from environment variable
 
 # ---------- REAL GATEWAY CHECKERS ----------
 
